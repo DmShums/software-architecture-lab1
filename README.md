@@ -12,33 +12,33 @@ python3 runner.py
 
 ### Implementation
 
-**Method**: GET
-**Service**: facade
-**Url**: http://0.0.0.0:8000/facade-service 
+**Method**: GET<br>
+**Service**: facade<br>
+**Url**: http://0.0.0.0:8000/facade-service <br>
 <img src="imgs/facade_get.png" />
 
 <br>
 
-**Method**: POST
-**Service**: facade
-**Url**: http://0.0.0.0:8000/facade-service 
+**Method**: POST<br>
+**Service**: facade<br>
+**Url**: http://0.0.0.0:8000/facade-service <br>
 <img src="imgs/facade_post.png" />
 
 
 <br>
 
-**Method**: GET
-**Service**: logging
-**Url**: http://0.0.0.0:8001/logging-service
+**Method**: GET<br>
+**Service**: logging<br>
+**Url**: http://0.0.0.0:8001/logging-service<br>
 <img src="imgs/logging_get.png" />
 After adding one more message:
 <img src="imgs/logging_get2.png" />
 
 <br>
 
-**Method**: POST
-**Service**: logging
-**Url**: http://0.0.0.0:8001/logging-service
+**Method**: POST<br>
+**Service**: logging<br>
+**Url**: http://0.0.0.0:8001/logging-service<br>
 **Console output:**
 <img src="imgs/console_output.png" />
 
