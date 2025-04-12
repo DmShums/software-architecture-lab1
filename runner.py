@@ -1,36 +1,47 @@
-"""runner script"""
-
 import uvicorn
 import multiprocessing
 import os
+import hazelcast
 
 from facade_service import facade_service
 from logging_service import logging_service
 from messages_service import messages_service
 
-
 FACADE_PORT = 8000
-LOGGING_PORT = 8001
-MESSAGES_PORT = 8002
+MESSAGES_PORT1 = 8001
+MESSAGES_PORT2 = 8005
+LOGGING_PORT1 = 8002
+LOGGING_PORT2 = 8003
+LOGGING_PORT3 = 8004
 
 def run_facade_service():
     uvicorn.run(facade_service, host="0.0.0.0", port=FACADE_PORT)
 
-def run_logging_service():
-    uvicorn.run(logging_service, host="0.0.0.0", port=LOGGING_PORT)
+def run_logging_service(port):
+    uvicorn.run(logging_service, host="0.0.0.0", port=port)
 
-def run_messages_service():
-    uvicorn.run(messages_service, host="0.0.0.0", port=MESSAGES_PORT)
+def run_messages_service(port):
+    uvicorn.run(messages_service, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    process1 = multiprocessing.Process(target=run_facade_service)
-    process2 = multiprocessing.Process(target=run_logging_service)
-    process3 = multiprocessing.Process(target=run_messages_service)
+    process_facade = multiprocessing.Process(target=run_facade_service)
+    process_messages1 = multiprocessing.Process(target=run_messages_service, args=(MESSAGES_PORT1,))
+    process_messages2 = multiprocessing.Process(target=run_messages_service, args=(MESSAGES_PORT2,))
+    process_logging1 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT1,))
+    process_logging2 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT2,))
+    process_logging3 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT3,))
 
-    process1.start()
-    process2.start()
-    process3.start()
+    processes = [
+        process_facade,
+        process_messages1,
+        process_messages2,
+        process_logging1,
+        process_logging2,
+        process_logging3
+    ]
 
-    process1.join()
-    process2.join()
-    process3.join()
+    for process in processes:
+        process.start()
+
+    for process in processes:
+        process.join()
