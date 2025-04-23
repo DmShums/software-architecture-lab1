@@ -1,4 +1,4 @@
-# software-architecture-lab4
+# software-architecture-lab5
 
 This project demonstrates a fault‑tolerant messaging system using Docker Compose and Kafka brokers.
 
