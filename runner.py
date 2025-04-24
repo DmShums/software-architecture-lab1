@@ -1,47 +1,56 @@
-import uvicorn
-import multiprocessing
 import os
-import hazelcast
+import multiprocessing
+import uvicorn
 
-from facade_service import facade_service
-from logging_service import logging_service
-from messages_service import messages_service
+from facade_service import app as facade_app
+from logging_service import app as logging_app
+from messages_service import app as messages_app
 
-FACADE_PORT = 8000
-MESSAGES_PORT1 = 8001
-MESSAGES_PORT2 = 8005
-LOGGING_PORT1 = 8002
-LOGGING_PORT2 = 8003
-LOGGING_PORT3 = 8004
+FACADE_PORT   = 8000
+MESSAGES_PORTS = [8001, 8005]
+LOGGING_PORTS = [8002, 8003, 8004]
+
 
 def run_facade_service():
-    uvicorn.run(facade_service, host="0.0.0.0", port=FACADE_PORT)
+    """Runs the Facade Service on its designated port."""
+    uvicorn.run(facade_app, host="0.0.0.0", port=FACADE_PORT)
 
-def run_logging_service(port):
-    uvicorn.run(logging_service, host="0.0.0.0", port=port)
 
-def run_messages_service(port):
-    uvicorn.run(messages_service, host="0.0.0.0", port=port)
+def run_logging_service(port: int):
+    os.environ["LOGGING_PORT"] = str(port)
+    uvicorn.run(logging_app, host="0.0.0.0", port=port)
+
+
+def run_messages_service(port: int):
+    os.environ["MESSAGES_PORT"] = str(port)
+    uvicorn.run(messages_app, host="0.0.0.0", port=port)
+
 
 if __name__ == "__main__":
-    process_facade = multiprocessing.Process(target=run_facade_service)
-    process_messages1 = multiprocessing.Process(target=run_messages_service, args=(MESSAGES_PORT1,))
-    process_messages2 = multiprocessing.Process(target=run_messages_service, args=(MESSAGES_PORT2,))
-    process_logging1 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT1,))
-    process_logging2 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT2,))
-    process_logging3 = multiprocessing.Process(target=run_logging_service, args=(LOGGING_PORT3,))
+    processes = []
 
-    processes = [
-        process_facade,
-        process_messages1,
-        process_messages2,
-        process_logging1,
-        process_logging2,
-        process_logging3
-    ]
+    processes.append(
+        multiprocessing.Process(target=run_facade_service)
+    )
 
-    for process in processes:
-        process.start()
+    for port in MESSAGES_PORTS:
+        processes.append(
+            multiprocessing.Process(
+                target=run_messages_service,
+                args=(port,),
+            )
+        )
 
-    for process in processes:
-        process.join()
+    for port in LOGGING_PORTS:
+        processes.append(
+            multiprocessing.Process(
+                target=run_logging_service,
+                args=(port,),
+            )
+        )
+
+    for p in processes:
+        p.start()
+
+    for p in processes:
+        p.join()

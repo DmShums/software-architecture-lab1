@@ -5,3 +5,4 @@ requests
 grpcio
 grpcio-tools
 confluent_kafka
+python-consul

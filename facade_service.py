@@ -1,97 +1,114 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
 import uuid
-import httpx
 import random
 import asyncio
+
+import httpx
+from fastapi import FastAPI
+from pydantic import BaseModel
 from confluent_kafka import Producer
 
-facade_service = FastAPI()
+from consul_service import (
+    register_service,
+    deregister_service,
+    discover_service,
+    get_kv,
+)
 
-producer_config = {"bootstrap.servers": "localhost:9092,localhost:9093,localhost:9094"}
+CONSUL_HOST     = "localhost"
+SERVICE_NAME    = "facade-service"
+SERVICE_PORT    = 8000
+SERVICE_ID      = f"{SERVICE_NAME}-{uuid.uuid4()}"
 
-producer = Producer(producer_config)
+KV_KAFKA_BOOT   = "config/kafka/bootstrap"
+KV_MQ_QUEUE     = "config/mq/queue_name"
+
+app = FastAPI(title="Facade Service")
+
+@app.on_event("startup")
+async def on_startup():
+    register_service(CONSUL_HOST, SERVICE_NAME, SERVICE_ID, SERVICE_PORT)
+
+    bootstrap = get_kv(CONSUL_HOST, KV_KAFKA_BOOT)
+    print(f"[DEBUG] Kafka bootstrap.servers = {bootstrap!r}")
+    app.state.producer = Producer({"bootstrap.servers": bootstrap})
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    deregister_service(CONSUL_HOST, SERVICE_ID)
+    app.state.producer.flush(10.0)
 
 class RequestModel(BaseModel):
     text: str
 
-class FacadeController:
-    """Facade controller class"""
-    logging_service_urls = [
-        "http://127.0.0.1:8002/logging-service",
-        "http://127.0.0.1:8003/logging-service",
-        "http://127.0.0.1:8004/logging-service"
-    ]
+def build_service_urls(service_name: str, path: str) -> list[str]:
+    """
+    Query Consul for all healthy instances of `service_name`
+    and build full HTTP URLs including the given path.
+    """
+    instances = discover_service(CONSUL_HOST, service_name)
+    urls = []
+    for inst in instances:
+        host = inst.get("ServiceAddress") or inst.get("Address")
+        port = inst["ServicePort"]
+        urls.append(f"http://{host}:{port}{path}")
+    return urls
 
-    messages_service_urls = [
-        "http://127.0.0.1:8001/messages",
-        "http://127.0.0.1:8005/messages"
-    ]
 
-    @facade_service.post("/facade-service")
-    async def post_request(data: RequestModel):
-        new_uuid = str(uuid.uuid4())
-        message = {"id": new_uuid, "text": data.text}
+@app.post("/facade-service")
+async def post_request(payload: RequestModel):
+    msg_id = str(uuid.uuid4())
+    try:
+        app.state.producer.produce(
+            topic="messages",
+            key=msg_id,
+            value=payload.text.encode(),
+        )
+        app.state.producer.flush()
+    except Exception as e:
+        return {"error": "Failed to send to Kafka", "details": str(e)}
 
-        try:
-            producer.produce(
-                topic="messages",
-                key=new_uuid,
-                value=data.text.encode("utf-8")
-            )
-            producer.flush() 
-            print(f"Produced message with ID {new_uuid} to Kafka.")
-        except Exception as e:
-            print(f"Failed to send message to Kafka: {e}")
-            return {"error": "Failed to send message to Kafka"}
+    logging_urls = build_service_urls("logging-service", "/logging-service")
+    random.shuffle(logging_urls)
 
-        # Randomly try one of the logging services
-        shuffled_services = random.sample(FacadeController.logging_service_urls,
-                                          len(FacadeController.logging_service_urls))
-        
-        async with httpx.AsyncClient() as client:
-            for selected_service in shuffled_services:
-                try:
-                    response = await client.post(selected_service, json=message)
-                    response.raise_for_status()
-                    return {"status": "Message logged", "message_id": new_uuid}
-                except httpx.RequestError as e:
-                    print(f"Request to {selected_service} failed: {e}")
-                    await asyncio.sleep(1)
+    async with httpx.AsyncClient() as client:
+        for url in logging_urls:
+            try:
+                r = await client.post(url, json={"id": msg_id, "text": payload.text})
+                r.raise_for_status()
+                return {"status": "Message logged", "message_id": msg_id}
+            except Exception:
+                await asyncio.sleep(0.2)
+    return {"error": "All logging-service instances unavailable."}
 
-        return {"error": "All logging services are unavailable."}
 
-    @facade_service.get("/facade-service")
-    async def get_combined_messages():
-        combined_response = {"logging_messages": [], "messages_service_messages": []}
-        
-        shuffled_logging = random.sample(FacadeController.logging_service_urls,
-                                         len(FacadeController.logging_service_urls))
-        async with httpx.AsyncClient() as client:
-            for url in shuffled_logging:
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    combined_response["logging_messages"] = resp.json().get("messages", [])
-                    break
-                except httpx.RequestError as e:
-                    print(f"Request to logging service {url} failed: {e}")
-                    await asyncio.sleep(1)
-            
+@app.get("/facade-service")
+async def get_combined_messages():
+    combined = {"logging": [], "messages": []}
 
-            shuffled_messages = random.sample(FacadeController.messages_service_urls,
-                                              len(FacadeController.messages_service_urls))
-            for url in shuffled_messages:
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    combined_response["messages_service_messages"] = resp.json().get("messages", [])
-                    break
-                except httpx.RequestError as e:
-                    print(f"Request to messages service {url} failed: {e}")
-                    await asyncio.sleep(1)
-                    
-        if not combined_response["logging_messages"] and not combined_response["messages_service_messages"]:
-            return {"error": "All services are unavailable."}
-        
-        return combined_response
+    logging_urls = build_service_urls("logging-service", "/logging-service")
+    random.shuffle(logging_urls)
+    async with httpx.AsyncClient() as client:
+        for url in logging_urls:
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                combined["logging"] = r.json().get("messages", [])
+                break
+            except Exception:
+                await asyncio.sleep(0.2)
+
+    msg_urls = build_service_urls("messages-service", "/messages")
+    random.shuffle(msg_urls)
+    async with httpx.AsyncClient() as client:
+        for url in msg_urls:
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                combined["messages"] = r.json().get("messages", [])
+                break
+            except Exception:
+                await asyncio.sleep(0.2)
+
+    if not (combined["logging"] or combined["messages"]):
+        return {"error": "All downstream services unavailable."}
+    return combined

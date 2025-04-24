@@ -1,31 +1,64 @@
+import uuid
 from fastapi import FastAPI
 from pydantic import BaseModel
 import hazelcast
 import os
 
-logging_service = FastAPI()
-
-# Hazelcast client configuration
-hazelcast_client = hazelcast.HazelcastClient(
-    cluster_members=["127.0.0.1:5701", "127.0.0.1:5702", "127.0.0.1:5703"],
-    cluster_name="dev"
+from consul_service import (
+    register_service,
+    deregister_service,
+    get_kv,
 )
-messages_map = hazelcast_client.get_map("hdmap").blocking()
+
+
+CONSUL_HOST      = "localhost"
+SERVICE_NAME     = "logging-service"
+SERVICE_PORT     = int(os.getenv("LOGGING_PORT", 8002))
+SERVICE_ID       = f"{SERVICE_NAME}-{uuid.uuid4()}"
+
+KV_HZ_MEMBERS    = "config/hazelcast/members"
+KV_HZ_CLUSTER    = "config/hazelcast/cluster"
+
+
+app = FastAPI(title="Logging Service")
+
+@app.on_event("startup")
+async def on_startup():
+    register_service(CONSUL_HOST, SERVICE_NAME, SERVICE_ID, SERVICE_PORT)
+    members_csv = get_kv(CONSUL_HOST, KV_HZ_MEMBERS)
+    cluster_name = get_kv(CONSUL_HOST, KV_HZ_CLUSTER)
+    members = [m.strip() for m in members_csv.split(",") if m.strip()]
+
+    app.state.hz = hazelcast.HazelcastClient(
+        cluster_members=members,
+        cluster_name=cluster_name
+    )
+    app.state.map = app.state.hz.get_map("hdmap").blocking()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    deregister_service(CONSUL_HOST, SERVICE_ID)
+    await app.state.hz.shutdown()
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "UP"}
+
 
 class RequestModel(BaseModel):
     id: str
     text: str
 
-class LoggingController:
-    """Logging controller class"""
 
-    @logging_service.post("/logging-service")
-    async def post_request(data: RequestModel):
-        messages_map.put(data.id, data.text)
-        print(f"Received message: {data.text}")
-        return {"message": "Logged successfully"}
+@app.post("/logging-service")
+async def post_request(data: RequestModel):
+    app.state.map.put(data.id, data.text)
+    return {"message": "Logged successfully"}
 
-    @logging_service.get("/logging-service")
-    async def get_request():
-        messages_list = list(messages_map.values())
-        return {"messages": messages_list}
+
+@app.get("/logging-service")
+async def get_request():
+    messages = list(app.state.map.values())
+    return {"messages": messages}

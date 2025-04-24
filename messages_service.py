@@ -1,42 +1,76 @@
-import fastapi
-from confluent_kafka import Consumer
+import threading
+import time
 from typing import List
-import multiprocessing
 
-messages_service = fastapi.FastAPI()
+import fastapi
+from fastapi import FastAPI
+from confluent_kafka import Consumer
+from pydantic import BaseModel
 
+from consul_service import (
+    register_service,
+    deregister_service,
+    get_kv,
+)
 
-messages: List[str] = []
+import uuid
+import os
 
-def consume_messages(group_id):
-    config = {
-        "bootstrap.servers": "localhost:9092,localhost:9093,localhost:9094",
-        "group.id": group_id,
+CONSUL_HOST      = "localhost"
+SERVICE_NAME     = "messages-service"
+SERVICE_PORT     = int(os.getenv("MESSAGES_PORT", 8001))
+SERVICE_ID       = f"{SERVICE_NAME}-{uuid.uuid4()}"
+
+KV_KAFKA_BOOT    = "config/kafka/bootstrap"
+KV_MQ_TOPIC      = "config/mq/queue_name"
+
+app = FastAPI(title="Messages Service")
+
+@app.on_event("startup")
+def on_startup():
+    register_service(CONSUL_HOST, SERVICE_NAME, SERVICE_ID, SERVICE_PORT)
+
+    bootstrap = get_kv(CONSUL_HOST, KV_KAFKA_BOOT)
+    topic     = get_kv(CONSUL_HOST, KV_MQ_TOPIC)
+    
+    consumer_conf = {
+        "bootstrap.servers": bootstrap,
+        "group.id": SERVICE_ID,
         "auto.offset.reset": "earliest"
     }
-    consumer = Consumer(config)
-    consumer.subscribe(["messages"])
+    app.state.topic    = topic
+    app.state.consumer = Consumer(consumer_conf)
+    app.state.consumer.subscribe([topic])
 
-    while True:
-        msg = consumer.poll(timeout=1.0)
-        if msg is None:
-            continue
-        if msg.error():
-            print(f"[ERROR] {msg.error()}")
-            continue
-        decoded = msg.value().decode("utf-8")
-        print(f"[Kafka] {decoded}")
-        messages.append(decoded)
+    app.state.messages: List[str] = []
+    def poll_loop():
+        while True:
+            msg = app.state.consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"[Kafka ERROR] {msg.error()}")
+                continue
+            text = msg.value().decode("utf-8")
+            print(f"[Kafka] {text}")
+            app.state.messages.append(text)
+    t = threading.Thread(target=poll_loop, daemon=True)
+    app.state._poll_thread = t
+    t.start()
 
-# Expose an endpoint that returns all messages from Kafka
-@messages_service.get("/messages")
+
+@app.on_event("shutdown")
+def on_shutdown():
+    deregister_service(CONSUL_HOST, SERVICE_ID)
+    app.state.consumer.close()
+
+@app.get("/health")
+def health():
+    return {"status": "UP"}
+
+class MessagesResponse(BaseModel):
+    messages: List[str]
+
+@app.get("/messages", response_model=MessagesResponse)
 def get_messages():
-    return {"messages": messages}
-
-if __name__ == "__main__":
-    import multiprocessing
-    multiprocessing.set_start_method("spawn", force=True)
-    group_id = "message-consumer-group"
-    consumer_process = multiprocessing.Process(target=consume_messages, args=(group_id,))
-    consumer_process.daemon = True
-    consumer_process.start()
+    return {"messages": app.state.messages}
