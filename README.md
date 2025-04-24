@@ -13,7 +13,6 @@ This project demonstrates a fault‑tolerant messaging architecture using Consul
 5. [Usage Examples](#usage-examples)
 6. [Observing Service Discovery](#observing-service-discovery)
 7. [Clean Up](#clean-up)
-8. [Troubleshooting](#troubleshooting)
 
 ---
 
