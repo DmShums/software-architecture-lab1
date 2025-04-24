@@ -67,9 +67,6 @@ curl -X PUT http://localhost:8500/v1/kv/config/hazelcast/cluster \
 ```  
 
 Inspect loaded KV:
-```bash
-curl http://localhost:8500/v1/kv/config?recurse
-```  
 ![](images/4.png)
 
 ---
