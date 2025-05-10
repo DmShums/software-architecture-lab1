@@ -3,3 +3,4 @@ uvicorn
 requests
 grpcio
 grpcio-tools
+tenacity

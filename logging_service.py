@@ -1,24 +1,33 @@
-"""Stores all messages it receives in memory and can return them."""
+# logging_service.py
+import grpc
+from concurrent import futures
+from generated import services_pb2, services_pb2_grpc
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+class LoggingServicer(services_pb2_grpc.LoggingServiceServicer):
+    def __init__(self):
+        self._messages = {}
 
-logging_service = FastAPI()
+    def Log(self, request, context):
+        if request.id in self._messages:
+            print(f"[logging] Duplicate received, id={request.id}; skipping.")
+        else:
+            self._messages[request.id] = request.text
+            print(f"[logging] Received new message: {request.text!r} (id={request.id})")
+        return services_pb2.Empty()
 
-class RequestModel(BaseModel):
-    id: str
-    text: str
+    def GetLogs(self, request, context):
+        entries = [
+            services_pb2.LogEntry(id=k, text=v)
+            for k, v in self._messages.items()
+        ]
+        return services_pb2.GetLogsResponse(entries=entries)
 
-class LoggingController:
-    """Logging controller class"""
-    messages = {}
+def serve():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    services_pb2_grpc.add_LoggingServiceServicer_to_server(LoggingServicer(), server)
+    server.add_insecure_port('[::]:8001')
+    server.start()
+    server.wait_for_termination()
 
-    @logging_service.post("/logging-service")
-    def post_request(data: RequestModel):
-        LoggingController.messages[data.id] = data.text
-        print(f"Received message: {data.text}")
-        return {"message": "Logged successfully"}
-
-    @logging_service.get("/logging-service")
-    def get_request():
-        return list(LoggingController.messages.values())
+if __name__ == "__main__":
+    serve()

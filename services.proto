@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package services;
+
+// The request message for logging.
+message LogRequest {
+  string id   = 1;
+  string text = 2;
+}
+
+// The empty reply.
+message Empty {}
+
+// Request for getting all logs (empty).
+message GetLogsRequest {}
+
+// A single log entry.
+message LogEntry {
+  string id   = 1;
+  string text = 2;
+}
+
+// The reply for getting logs.
+message GetLogsResponse {
+  repeated LogEntry entries = 1;
+}
+
+// The reply for the static message.
+message MessageResponse {
+  string message = 1;
+}
+
+// Logging service definition.
+service LoggingService {
+  rpc Log(LogRequest) returns (Empty);
+  rpc GetLogs(GetLogsRequest) returns (GetLogsResponse);
+}
+
+// Messages service definition.
+service MessageService {
+  rpc GetMessage(Empty) returns (MessageResponse);
+}

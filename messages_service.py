@@ -1,9 +1,17 @@
-"""returns static message"""
+import grpc
+from concurrent import futures
+from generated import services_pb2, services_pb2_grpc
 
-import fastapi
+class MessageServicer(services_pb2_grpc.MessageServiceServicer):
+    def GetMessage(self, request, context):
+        return services_pb2.MessageResponse(message="Hello from gRPC!")
 
-messages_service = fastapi.FastAPI()
+def serve():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
+    services_pb2_grpc.add_MessageServiceServicer_to_server(MessageServicer(), server)
+    server.add_insecure_port('[::]:8002')
+    server.start()
+    server.wait_for_termination()
 
-@messages_service.get("/message")
-def send_message():
-    return {"message": "not implemented yet"}
+if __name__ == "__main__":
+    serve()
